@@ -1,0 +1,434 @@
+# Data Format
+
+The `lmd` data format is described on page 4-5 of the
+[https://www.beckmancoulter.com/wsrportal/ajax/downloadDocument/773231AD.pdf?autonomyId=TP_DOC_32383&documentName=773231AD.pdf&documentAccessType=PUBLIC](Gallios
+Manual). [../refs/gallios_lmd_format.pdf](Excerpt). From that source, the `lmd`
+format is described as:
+
+> Flow Cytometric Standard (FCS) file format for listmode and histogram
+> files. Listmode files contain an FCS 2.0 dataset followed by an FCS 3.0
+> dataset. 
+
+The structure is:
+
+|----------------------|
+| FCS 2.0              |
+|----------------------|
+| Acquisition Protocol |
+|----------------------|
+| FCS 3.0              |
+|----------------------|
+
+# Getting Started
+## Setup
+Initial setup requires installing the necessary packages from Bioconductor.
+This step is necessary only when initially installing or upgrading the
+packages, you don't normally need to run it:
+
+```{r, eval=FALSE}
+source("http://bioconductor.org/biocLite.R")
+biocLite()
+biocLite("BiocUpgrade")
+biocLite("flowCore")                    # core functions
+biocLite("flowViz")                     # for plotting
+biocLite("flowFit")                     # model fitting for histograms
+```
+
+After the packages are installed, barring upgrades, this is all that you
+need: 
+```{r}
+library(flowCore)
+```
+## Importing Data
+
+### flowFrame
+
+Load the data with `read.FCS`, producing individual `flowFrame` objects.
+The argument `dataset` indicates which format to extract: `1` selects FCS
+Version 2.0, `2` selections version 3.0.
+
+```{r}
+lmd1 <- read.FCS("test-data/LMD good/188-15_+_rad_2015-04-20_647.LMD",
+                 dataset = 1, alter.names = TRUE)
+lmd2 <- read.FCS("test-data/LMD good/188-15_+_rad_2015-04-20_647.LMD",
+                 dataset = 2) 
+lmd1
+summary(lmd1)
+```
+
+The result is an object of class `flowFrame`:
+
+>      This class represents the data contained in a FCS file or similar
+>      data structure. There are three parts of the data:
+
+>       1. a numeric matrix of the raw measurement values with
+>          ‘rows=events’ and ‘columns=parameters’
+>
+>       2. annotation for the parameters (e.g., the measurement
+>          channels, stains, dynamic range)
+>
+>       3. additional annotation provided through keywords in the FCS
+>          file
+
+There are three slots:
+
+1. `exprs`: a matrix with events/cells as rows, channels as columns
+2. `parameters`": an `AnnotatedDataFrame`, containing summaries of the
+column data (access via pData(parameters(lmd2)))
+3. `description`: metadata from the source file, a list of names keywords
+
+Extract and manipulate the values from each slot with `exprs()`,
+`parameters()` and `description`, respectively. Individual keywords are
+accessible via `keyword`. Parameter names are accessible via `colnames` or
+`featureNames` (synonyms).
+
+### flowSet
+
+`flowSet` is a class that contains a list of `flowFrame` objects, and some
+metaData. Easiest to create directly from a folder of files:
+
+```{r}
+fs <- read.flowSet(path = "test-data/LMD good/", alter.names = TRUE,
+                   dataset = 1)
+
+```
+
+See the help files for additional details, which I think are not crucial to
+our current mission.
+
+## Visualization
+
+Basic plotting is provided via `flowViz`:
+
+```{r}
+library(flowViz)
+par(mfrow = c(1,1))
+plot(lmd1, main = "Pair-plots of Flow Channels")
+plot(lmd1, c("FL3.INT.LIN", "SS.TOF.LIN"),
+     main = "Scatterplot of FL3 area and SS TOF")
+plot(lmd1, "FL3.INT.LIN", breaks = 256, main = "Histogram of FL3 Area")
+par(mfrow = c(2,1))
+plot(lmd1, "FL3.INT.LIN", breaks = 256, main = "Histogram of FL3 area, FCS2 format")
+plot(lmd2, "FL3-A", breaks = 256, main = "Histogram of FL3 area, FC3 format")
+```
+# Histogram modelling
+
+Extract & bin the values. Note that the highest value for each column
+contains all values that are above detection thresholds, producing an
+artifact. Clip this value before fitting the models.
+
+```{r}
+fl3.trimmed <- exprs(lmd1)[, "FL3.INT.LIN"][exprs(lmd1)[, "FL3.INT.LIN"] < max(exprs(lmd1)[, "FL3.INT.LIN"])]
+fl3.1024 <- hist(fl3.trimmed, breaks = 1024)
+fl3.256 <- hist(fl3.trimmed, breaks = 256)
+```
+
+Convert to a dataframe, as required by `nls()`. Note that `hist()` provides
+bin boundaries as `$breaks`, and counts per bin as `$counts`. There is one
+more bin boundary than count, so we need to convert the bin boundaries into
+bin means, via `runmean()`.
+
+```{r}
+library(caTools)
+fl3.df <- data.frame(x = runmean(fl3.256$breaks, 2, endrule = "trim"),
+                     intensity = fl3.256$counts) 
+
+points(fl3.df, type = 'l', col = 3)
+
+```
+
+Build some model components. The dependent variable in each model component
+is `xx`, but is not explicitly added to the formal arguments until the
+components are collected together with buildModel.
+
+```{r}
+gaussDipA  <- function(a1 = a1, Ma = Ma, Sa = Sa, a2 = a2){
+    a1 * exp(-((xx - Ma)^2)/(2 * Sa^2)) +
+      a2 * exp(-((xx - Ma * 2)^2)/(2 * (Sa * 2)^2))
+}
+  
+gaussDipB  <- function(b1 = b1, Mb = Mb, Sb = Sb, b2 = b2){
+  b1 * exp(-((xx - Mb)^2)/(2 * Sb^2)) +
+    b2 * exp(-((xx - Mb * 2)^2)/(2 * (Sb * 2)^2))
+}
+
+singleCut <- function(SCa, SCn, SCbins){
+  Pjx <- function(j, x){
+    2 / (pi * sqrt( (x/j) * (1 - x/j)))
+  }
+
+  for(i in seq_along(SCbins)){
+    ## what goes here??
+  }
+}
+
+buildModel <- function(models) {
+  modelComponents <- vector(mode = "character", length(models))
+
+  model <- function(){}
+  
+  for (i in seq_along(models)){
+    modelComponents[i] <- as.character(body(get(models[[i]])))[2]
+    formals(model) <- c(formals(model), formals(models[i]))
+  }
+
+  modelParsed <- parse(text = paste(modelComponents, collapse = " + "))
+  body(model) <- modelParsed
+
+  formals(model) <- c(formals(model), alist(xx = ))
+  
+  return(model)
+}
+
+oneSample <- buildModel(c("gaussDipA", "gaussDipB"))
+oneSamplePars <- c(gaussDipApars, gaussDipBpars)
+
+```
+
+Test the model:
+
+```{r}
+
+m2 <-
+  nls(intensity ~
+        oneSample(Ma = Ma, a1 = a1, Sa = Sa, a2 = a2,
+                  Mb = Mb, b1 = b1, Sb = Sb, b2 = b2, xx = x),
+      data = fl3.df,
+      start = list(Ma = 400, a1 = 2000, Sa = 10, a2 = 300,
+                   Mb = 500, b1 = 500, Sb = 10, b2 = 10))
+
+                                
+```
+
+# flowFit#
+
+### Package Examples
+```{r}
+biocLite("flowFit")
+biocLite("flowFitExampleData")
+library(flowFit)
+library("flowFitExampleData")
+data(QuahAndParish)
+QuahAndParish[[1]]
+parent.fitting.cfse <- parentFitting(QuahAndParish[[1]], "<FITC-A>")
+plot(parent.fitting.cfse)
+parent.fitting.cpd <- parentFitting(QuahAndParish[[1]], "<APC-A>")
+plot(parent.fitting.cpd)
+parent.fitting.ctv <- parentFitting(QuahAndParish[[1]], "<Alexa Fluor 405-A>")
+plot(parent.fitting.ctv)
+
+```
+
+### flowFit in small pieces
+
+There is an incompatibility between flowFit and our lmd files, something is
+different in the keywords? I don't understand yet, but it prevents flowFit
+from finding LogDecades. An ugly fix is just this:
+
+```{r}
+parent.fitting.lmd1 <- parentFitting(lmd1, "FL3.INT.LIN",
+                                     logDecades =
+                                       log10(lmd1@parameters@data$range[4]),
+                                     verbose = TRUE) 
+plot(parent.fitting.lmd1)
+```
+
+Which provides the log decades that would have been generated had the
+function worked as expected. Probably not important in the end, as we don't
+want to do this actual analysis, but it is a problem to overcome as I move
+deeper into the flowFit code.
+
+Note, however, that `logDecades` isn't actually used in the analysis
+itself, just in the way axes are drawn after the fact:
+
+```{r}
+p.f.lmd1.LD1 <- parentFitting(lmd1, "FL3.INT.LIN",
+                                     logDecades = 1, verbose = TRUE) 
+plot(p.f.lmd1.LD1)
+```
+
+So that's weird. Aborting the function due to a missing value that you
+don't actually use.
+
+In any case, their algorithm is:
+1. If no estimates are provided, the starting values are set as:
+   - PeakPosition = mean value of the channel (assumes only one peak is
+     present, as expected for this kind of experiment)
+   - PeakSize = sd of the channel
+   - dataRange = channel range
+   These values are stored in the @parStart slot
+2.  
+
+NB: to install ncdfFlow on Debian you must download the source and install by hand:
+
+
+    R CMD INSTALL ncdfFlow --configure-args="--with-hdf5='/usr/lib/x86_64-linux-gnu/hdf5/serial'"
+
+
+```{r}
+biocLite("ncdfFlow")
+biocLite("rhdf5")
+
+library("ncdfFlow") ## not sure if this is needed yet?
+
+lmd <- # FCS 2.0 format
+  read.ncdfFlowSet("test-data/LMD good/188-15_+_rad_2015-04-20_647.LMD",
+                   dataset = 1)
+
+lmd3 <- # FCS 3.0 format
+  read.ncdfFlowSet("test-data/LMD good/188-15_+_rad_2015-04-20_647.LMD",
+                   dataset = 2)
+```
+
+Note that the Gallios `.lmd` files contain the data twice, once in 10 bit
+FCS2.0 format, and once in 20 bit FCS3.0 format. 
+
+My understanding is that only the FCS2.0 format is readable via
+`read.ncdfFlowset`. Calling the function without setting the `dataset`
+argument will result a warning being issued, to the effect that only one of
+two available datasets was read. However, attempting to access the second
+dataset with `dataset = 2` produces an error, indicating something in the
+second, FCS3.0 data block is improperly formatted, or is improperly parsed
+by `read.ncdfFlowset`.
+
+I have traced the problem to the `readFCStext` function in `flowCore`.
+After calling `read.ncdfFlowSet`, `readFCStext` is called from
+`read.FCSheader`. At this point, it returns a named vector containing
+channels with names like "FS INT LIN", "FL3 INT LIN" etc. These appear to
+be the names that the function uses to parse the actual flow data.
+Unfortunately, these are the headers for the FCS 2 data, and the FCS 3 data
+uses different labels: `FS-H`, `FL3-A` etc. So we must use the lower-level
+`read.FCS` to extract the actual data, if we want to access the FCS 3.0
+format.
+
+
+library(flowWorkspace)
+
+
+a
+y
+y
+biocLite("flowWorkspace")
+n
+installed.packages()
+installed.packages()
+library(biocInstaller)
+library(biocinstaller)
+installed.packages()
+library(BiocInstaller)
+biocLite("openCyto")
+biocLite("flowviz")
+biocLite("flowViz")
+biocLite("flowClust")
+biocLite("ncdfFlow")
+biocLite("flowStats")
+biocLite("robCompositions")
+biocLite("GGally")
+biocLite("proto")
+biocLite("GGally")
+biocLite("scales")
+biocLite("GGally")
+biocLite("proto")
+biocLite("robCompositions")
+biocLite("flowStats")
+biocLite("flowClust")
+biocLite("flowWorkspace")
+biocLite("openCyto", dependencies = TRUE)
+library(flowWorkspace)
+flowDataPath <- system.file("extdata", package = "flowWorkspaceData"
+)
+wsfile <- list.files(flowDataPath, pattern = "manual.xml", full = TRUE)
+wsfile
+flowDataPath
+ws <- openWorkspace(wsfile)
+print(ws)
+ws
+gs <- parseWorkspace(ws, name = "T-cell", subset = 1, isNcdf = TRUE)
+gh <- gs[[1]]
+plot(gh)
+plotGate(gh)
+head(getPopStats(gs, statistic = "count"))
+head(getPopStats(gs, statistic = "freq"))
+head(getPopStats(gh, statistic = "count"))
+vignette("openCyto")
+help(package = "openCyto")
+vignette("openCytoVignette")
+gtFile <- system.file("extdata/gating_template/tcell.csv", package = "openCyto")
+dtTemplate <- fread(gtFile, autostart = 1L)
+library(data.table)
+dtTemplate <- fread(gtFile, autostart = 1L)
+dtTemplate
+gt_tcell <- gatingTemplate(gtFile, autostart = 1L)
+library(openCyto)
+gt_tcell <- gatingTemplate(gtFile, autostart = 1L)
+gt_tcell
+plot(gt_tcell)
+fcsFiles <- list.files(pattern = "CytoTrol", flowDataPath, full = TRUE)
+ncfs  <- read.ncdfFlowSet(fcsFiles)
+ncfs
+compMat <- getCompensationMatrices(gh)
+ncfs_comp <- compensate(ncfs, compMat)
+chnls <- parameters(compMat)
+transFuncts <- estimateLogicle(ncfs[[1]], channels = chnls)
+ncfs_trans <- transform(ncfs_comp, transFuncts)
+gs <- GatingSet(ncfs_trans)
+getNodes(gs[[1]])
+gating(gt_tcell, gs)
+warnings()
+plot(gs[[1]])
+dodesToHide <- c("cd8+", "cd4+"
+                , "cd4-cd8-", "cd4+cd8+"
+                , "cd4+cd8-/HLA+", "cd4+cd8-/CD38+"
+                , "cd4-cd8+/HLA+", "cd4-cd8+/CD38+"
+                , "CD45_neg/CCR7_gate", "cd4+cd8-/CD45_neg"
+                , "cd4-cd8+/CCR7+", "cd4-cd8+/CD45RA+"
+                )
+lapply(dodesToHide, function(thisNode)setNode(gs, thisNode, FALSE))
+plotGate(gs[[1]])
+lmd <- read.ncdfFlowSet("test-data/188-15_+_rad_2015-04-20_647.LMD")
+getwd()
+lmd <- read.ncdfFlowSet("test-data/188-15_+_rad_2015-04-20_647.LMD")
+lmd <- read.ncdfFlowSet("../../test-data/188-15_+_rad_2015-04-20_647.LMD")
+
+lmd1 <- read.ncdfFlowSet("../test-data/LMD good/188-15_+_rad_2015-04-20_647.LMD", dataset = 1)
+lmd2 <- read.ncdfFlowSet("../test-data/LMD good/188-15_+_rad_2015-04-20_647.LMD", dataset = 2)
+plot(lmd1)
+library(flowViz)
+plot(lmd1)
+typeof(lmd1)
+class(lmd1)
+help(package = "flowViz")
+flowPlot(lmd1)
+xyplot(lmd1)
+lm1
+lmd1
+class?ncdfFlowSet
+xyplot(lmd1)
+show(lmd1)
+class?flowSet
+length(lmd1)
+lmd1[1]
+lmd1[1][, "FS"]
+lmd1[[1]]
+plot(lmd1[[1]])
+warnings()
+lmd1[[1]]$<
+names(lmd1[[1]])
+lmd1[[1]]
+lmd1[[1]]$p1
+lmd1[[1]]$P1
+class?flowFrame
+lmd1[[1]]
+lmd1[[1]][1:4,]
+lmd1[[1]][,3]
+lmd1[[1]][,"FS"]
+lmd1[[1]][,"FS INT LIN"]
+plot(lmd1[[1]], c("FS INT LIN", "SS INT LIN"))
+library(KernSmooth)
+plot(lmd1[[1]], c("FS INT LIN", "SS INT LIN"), gridsize = c(100, 100))
+plot(lmd1[[1]], c("FS INT LIN", "SS INT LIN"), smooth=FALSE)
+plot(lmd1[[1]], c("FS INT LIN", "SS INT LIN"), smooth=FALSE)
+
+
+
+# Math

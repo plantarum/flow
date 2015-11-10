@@ -1,0 +1,27 @@
+* \citet{bagwell_1993}
+
+Guassian:
+
+#+BEGIN_SRC gnuplot
+A = 100.0 ; sd = 0.6 5; mu = 100.0
+plot (A / (sqrt(2.0*pi) * sd)) * exp (-1.0 * ((x - mu)**2.0))/(2.0 * sd**2.0) , \
+(A / (2.0 * sd)) * ( erf( (x + 0.5 - mu) / sqrt(2.0 * sd)) - erf( (x - 0.5 - mu) / sqrt(2.0 * sd)))
+#+END_SRC
+
+#+RESULTS:
+
+#+BEGIN_SRC gnuplot
+## Exact form?
+A = 1.0 ; sd = 1.0 ; mu = 0.0
+plot (A / (2 * sd)) * ( erf( (x + 0.5 - mu) / sqrt(2 * sd)) - erf( (x - 0.5 - mu) / sqrt(2 * sd)))
+#plot (( erf( (x + 0.5 - mu) / sqrt(2 * sd)))
+#+END_SRC
+
+#+RESULTS:
+
+#+BEGIN_SRC gnuplot
+
+r = 2 ; x1 = 0 ; x2 = 5
+plot (r / 2) * erf((x2 - x)/sqrt(2 * sd)) - erf((x1 - x)/sqrt(2 * sd))
+#+END_SRC
+* 
