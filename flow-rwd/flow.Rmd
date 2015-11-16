@@ -142,6 +142,8 @@ is `xx`, but is not explicitly added to the formal arguments until the
 components are collected together with buildModel.
 
 ```{r}
+erf <- function(x) 2 * pnorm(x * sqrt(2)) - 1
+
 gaussDipA  <- function(a1 = a1, Ma = Ma, Sa = Sa, a2 = a2){
     a1 * exp(-((xx - Ma)^2)/(2 * Sa^2)) +
       a2 * exp(-((xx - Ma * 2)^2)/(2 * (Sa * 2)^2))
@@ -167,6 +169,12 @@ singleCut <- function(SCa, intensity){
   singleIter(SCa, intensity)
 }
 
+broadenedTrapezoid <- function(BTt1, BTt2, BTx1, BTx2, BTs1, BTs2){
+  ((BTt2 - BTt1) / (BTx2 - BTx1) * (xx - BTx2) + BTt2) *
+    ((erf((BTx2 - xx)/sqrt(2 * BTs2)) -
+      erf((BTx1 - xx)/sqrt(2 * BTs1))) / 2)
+}
+
 buildModel <- function(models) {
   ## Model components combined by buildModel must have a function body that
   ## is composed of a single line that evaluates to the return value of the
@@ -190,19 +198,10 @@ buildModel <- function(models) {
   return(model)
 }
 
-oneSampleSC <- 
-  function (a1 = a1, Ma = Ma, Sa = Sa, a2 = a2, b1 = b1, Mb = Mb, 
-            Sb = Sb, b2 = b2, SCa, SCchan, xx) {
-    a1 * exp(-((xx - Ma)^2)/(2 * Sa^2)) +
-      a2 * exp(-((xx - Ma * 2)^2)/(2 * (Sa * 2)^2)) +
-        b1 * exp(-((xx - Mb)^2)/(2 * Sb^2)) +
-        b2 * exp(-((xx - Mb * 2)^2)/(2 * (Sb * 2)^2)) +
-        singleCut(SCa, SCchan = seq_along(xx), xx)
-  }
-
 oneSample <- buildModel(c("gaussDipA", "gaussDipB"))
 
 oneSampleSC <- buildModel(c("gaussDipA", "gaussDipB", "singleCut"))
+oneSampleSCBT <- buildModel(c("gaussDipA", "gaussDipB", "singleCut", "broadenedTrapezoid"))
 
 oneSamplePars <- c(gaussDipApars, gaussDipBpars)
 
@@ -221,8 +220,45 @@ m3 <-
       start = list(Ma = 400, a1 = 500, Sa = 10, a2 = 50,
                    Mb = 550, b1 = 500, Sb = 10, b2 = 10,
                    SCa = 0.1))
-                                
+
+m4 <-
+  nls(intensity ~
+        oneSampleSCBT(a1 = a1, Ma = Ma, Sa = Sa, a2 = a2,
+                    b1 = b1, Mb = Mb, Sb = Sb, b2 = b2, SCa = SCa,
+                    intensity = intensity,
+                    BTt2 = BTt2, BTt1 = BTt1, BTx1 = Ma, BTx2 = 2 * Ma,
+                    BTs1 = BTs1, BTs2 = BTs2,
+                    xx = x), 
+      data = fl3.df,
+      start = list(Ma = 400, a1 = 500, Sa = 10, a2 = 50,
+                   Mb = 550, b1 = 500, Sb = 10, b2 = 10,
+                   SCa = 0.1, BTt2 = 10, BTt1 = 10, BTs1 = 10, BTs2 = 10))
+
 ``` 
+
+```{r Fitted Model, fig.cap = "Fitted Model", dpi = 200}
+hist(fl3.trimmed, breaks = 256, border = 0, col = "lightgray",
+     main = "", xlab = "channel", ylab = "counts")
+lines(x = fl3.df$x, y = predict(m3), col = 2)
+```
+
+```{r Fitted Model Components, fig.cap = "Fitted Model Components", dpi = 200}
+hist(fl3.trimmed, breaks = 256, border = 0, col = "lightgray",
+     xlab = "channel", ylab = "counts", main = "")
+lines(x = fl3.df$x, y = singleCut(SCa = coef(m3)["SCa"],
+                                  intensity = fl3.df$intensity), col = 2)
+xx <- fl3.df$x                          # awkward!!
+lines(x = fl3.df$x, y = gaussDipA(Ma = coef(m3)["Ma"], a1 = coef(m3)["a1"],
+                                  Sa = coef(m3)["Sa"], a2 = coef(m3)["a2"]),
+      col = 3)
+lines(x = fl3.df$x, y = gaussDipB(Mb = coef(m3)["Mb"], b1 = coef(m3)["b1"],
+                                  Sb = coef(m3)["Sb"], b2 = coef(m3)["b2"]),
+      col = 4)
+legend(legend = c("Internal Standard", "Sample", "Debris"),
+       col = c(3, 4, 2), x = "topright", pch = 1)
+```
+
+
 # flowFit#
 
 ### Package Examples
