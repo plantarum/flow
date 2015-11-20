@@ -40,7 +40,6 @@ need:
 library(flowCore)
 ```
 ## Importing Data
-
 ### flowFrame
 
 Load the data with `read.FCS`, producing individual `flowFrame` objects.
@@ -60,7 +59,7 @@ The result is an object of class `flowFrame`:
 
 >      This class represents the data contained in a FCS file or similar
 >      data structure. There are three parts of the data:
-
+>
 >       1. a numeric matrix of the raw measurement values with
 >          ‘rows=events’ and ‘columns=parameters’
 >
@@ -120,20 +119,26 @@ clipping artifact. Clip this value before fitting the models.
 ```{r}
 fl3.trimmed <- exprs(lmd1)[, "FL3.INT.LIN"][exprs(lmd1)[, "FL3.INT.LIN"] <
                                             max(exprs(lmd1)[, "FL3.INT.LIN"])]
-fl3.1024 <- hist(fl3.trimmed, breaks = 1024)
-fl3.256 <- hist(fl3.trimmed, breaks = 256)
+## Set one more break than the number of channels we want!
+fl3.1024 <- hist(fl3.trimmed, breaks = seq(from = 0, to=1024, by = 1))
+fl3.256 <- hist(fl3.trimmed, breaks = seq(from = 0, to = 1024, by = 4))
 ```
 
 Convert to a dataframe, as required by `nls()`. Note that `hist()` provides
-bin boundaries as `$breaks`, and counts per bin as `$counts`. There is one
-more bin boundary than count, so we need to convert the bin boundaries into
-bin means, via `runmean()`.
+bin boundaries as `$breaks`, midpoints as `$mids`, and counts per bin as
+`$counts`. The counts are our intensities, and the midpoints are the x
+values in terms of the channels in the original data. However, in ModFit,
+they use the channel number, rather than the channel midpoint, so to match
+their output (or at least put ours on the same scale), we need to do the
+same. 
 
 ```{r}
-library(caTools)
-fl3.df <- data.frame(x = runmean(fl3.256$breaks, 2, endrule = "trim"),
+## not sure we even need to explicitly identify x, it's just an index
+fl3.df <- data.frame(x = 1:length(fl3.256$counts),
                      intensity = fl3.256$counts) 
-points(fl3.df, type = 'l', col = 3)
+plot(fl3.df$intensity, type = 'n')
+polygon(x = c(fl3.df$x, 257), y = c(fl3.df$intensity, 0),
+                col = "lightgray", border = NA) 
 
 ```
 
@@ -145,20 +150,25 @@ components are collected together with buildModel.
 erf <- function(x) 2 * pnorm(x * sqrt(2)) - 1
 
 gaussDipA  <- function(a1 = a1, Ma = Ma, Sa = Sa, a2 = a2){
-    a1 * exp(-((xx - Ma)^2)/(2 * Sa^2)) +
-      a2 * exp(-((xx - Ma * 2)^2)/(2 * (Sa * 2)^2))
+    a1 / (sqrt(2 * pi) * Sa) * exp(-((xx - Ma)^2)/(2 * Sa^2)) +
+      a2 / (sqrt(2 * pi) * Sa * 2) * exp(-((xx - Ma * 2)^2)/(2 * (Sa * 2)^2))
 }
   
 gaussDipB  <- function(b1 = b1, Mb = Mb, Sb = Sb, b2 = b2){
-  b1 * exp(-((xx - Mb)^2)/(2 * Sb^2)) +
-    b2 * exp(-((xx - Mb * 2)^2)/(2 * (Sb * 2)^2))
+  b1 / (sqrt(2 * pi) * Sb) * exp(-((xx - Mb)^2)/(2 * Sb^2)) +
+    b2 / (sqrt(2 * pi) * Sb * 2) * exp(-((xx - Mb * 2)^2)/(2 * (Sb * 2)^2))
 }
 
 singleIter <- function(SCa, intensity){
-  channels = 1:length(intensity)
+  first.channel <- which(fl3.df$intensity > 0)[2]
+  # Don't extend the model below/beyond the data
+  # Modfit appears to cut off the debris slightly above the lowest data,
+  # which gives a better fit. Perhaps set first.channel to 2-4? Need to
+  # test this and determine best fit.
+  channels = first.channel:length(intensity)
   res = vector(length = length(intensity), mode = "numeric")
-  for(x in 1:(length(intensity) - 1)){
-    for(j in (x + 1):length(channels))
+  for(x in first.channel:(length(intensity) - 1)){
+    for(j in (x + 1):length(intensity))
       res[x] <- res[x] + j^(1/3) * intensity[j] * 2 / (pi * j * sqrt(x/j * (1 - x/j)))
   }
   res[length(res)] <- 0
@@ -193,7 +203,7 @@ buildModel <- function(models) {
   modelParsed <- parse(text = paste(modelComponents, collapse = " + "))
   body(model) <- modelParsed
   
-  formals(model) <- c(formals(model), alist(xx = ))
+  formals(model) <- c(alist(xx = ), formals(model) )
   
   return(model)
 }
@@ -201,15 +211,18 @@ buildModel <- function(models) {
 oneSample <- buildModel(c("gaussDipA", "gaussDipB"))
 
 oneSampleSC <- buildModel(c("gaussDipA", "gaussDipB", "singleCut"))
-oneSampleSCBT <- buildModel(c("gaussDipA", "gaussDipB", "singleCut", "broadenedTrapezoid"))
-
-oneSamplePars <- c(gaussDipApars, gaussDipBpars)
 
 ```
 
-Test the model:
+## Nonlinear regression
 
 ```{r}
+
+## For eyeballing the starting values:
+## tmp <- oneSampleSC(Ma = 97, a1 = 3000, Sa = 5, a2 = 500,
+##                    Mb = 135, b1 = 5000, Sb = 5, b2 = 10,
+##                    SCa = 0.1, intensity = fl3.df$intensity,
+##                    xx = fl3.df$x)
 
 m3 <-
   nls(intensity ~
@@ -217,10 +230,14 @@ m3 <-
                     b1 = b1, Mb = Mb, Sb = Sb, b2 = b2, SCa = SCa,
                     intensity = intensity, xx = x),
       data = fl3.df,
-      start = list(Ma = 400, a1 = 500, Sa = 10, a2 = 50,
-                   Mb = 550, b1 = 500, Sb = 10, b2 = 10,
+      start = list(Ma = 97, a1 = 3000, Sa = 5, a2 = 500,
+                   Mb = 135, b1 = 5000, Sb = 5, b2 = 10,
                    SCa = 0.1))
 
+## The following doesn't work yet, I suspect because the optimizer attempts
+## negative values for the broadened trapezoid heights (the true values are
+## very close to zero). Need to figure out how to constrain values in the
+## nls procedure before I can use this.
 m4 <-
   nls(intensity ~
         oneSampleSCBT(a1 = a1, Ma = Ma, Sa = Sa, a2 = a2,
@@ -233,31 +250,72 @@ m4 <-
       start = list(Ma = 400, a1 = 500, Sa = 10, a2 = 50,
                    Mb = 550, b1 = 500, Sb = 10, b2 = 10,
                    SCa = 0.1, BTt2 = 10, BTt1 = 10, BTs1 = 10, BTs2 = 10))
-
 ``` 
 
 ```{r Fitted Model, fig.cap = "Fitted Model", dpi = 200}
-hist(fl3.trimmed, breaks = 256, border = 0, col = "lightgray",
-     main = "", xlab = "channel", ylab = "counts")
-lines(x = fl3.df$x, y = predict(m3), col = 2)
-```
+plot(fl3.df$intensity, type = 'n', ylab = "counts", xlab = "channel") 
+polygon(x = c(fl3.df$x, 257), y = c(fl3.df$intensity, 0),
+                col = "lightgray", border = NA) 
 
-```{r Fitted Model Components, fig.cap = "Fitted Model Components", dpi = 200}
-hist(fl3.trimmed, breaks = 256, border = 0, col = "lightgray",
-     xlab = "channel", ylab = "counts", main = "")
+## Complete model
+lines(x = fl3.df$x, y = predict(m3), col = 2)
+
+## Debris:
 lines(x = fl3.df$x, y = singleCut(SCa = coef(m3)["SCa"],
-                                  intensity = fl3.df$intensity), col = 2)
+                                  intensity = fl3.df$intensity), col = 3,
+      lty = 2, lwd = 2)
 xx <- fl3.df$x                          # awkward!!
+
+## Internal Standard:
 lines(x = fl3.df$x, y = gaussDipA(Ma = coef(m3)["Ma"], a1 = coef(m3)["a1"],
                                   Sa = coef(m3)["Sa"], a2 = coef(m3)["a2"]),
-      col = 3)
+      col = 4)
+
+## Sample:
 lines(x = fl3.df$x, y = gaussDipB(Mb = coef(m3)["Mb"], b1 = coef(m3)["b1"],
                                   Sb = coef(m3)["Sb"], b2 = coef(m3)["b2"]),
-      col = 4)
-legend(legend = c("Internal Standard", "Sample", "Debris"),
-       col = c(3, 4, 2), x = "topright", pch = 1)
+      col = 5)
+
+legend(legend = c("Internal Standard", "Sample", "Debris", "Complete Model"),
+       col = c(4, 5, 3, 2), x = "topright", lty = c(1, 1, 2, 1))
 ```
 
+## Extracting cell counts
+
+Extracting cell counts requires plugging the parameter estimates back into
+the formulas and integrating them.
+
+Note that in ModFit, the results returned include values for 'All cycle
+events', as well as the percent for each component, e.g. 'Diploid 41.44%,
+Dip G1: 73.64%'. This means that of the 4866 total cycle events modelled,
+0.4144 * 0.7364 * 4866 = 1484 are from the Diploid G1 peak. 
+
+I can't integrate the entire model yet, as the way I have coded the debris
+function doesn't work with integrate. However, we don't actually need those
+values for our purposes, we can extract the components we need just fine:
+
+```{r}
+gaussAEvents <-
+  integrate(function (x) coef(m3)["a1"] / (sqrt(2 * pi) * coef(m3)["Sa"]) *
+                         exp(-((x - coef(m3)["Ma"])^2)/(2 *
+                                                        coef(m3)["Sa"]^2)),
+            0, 256)
+
+gaussBEvents <-
+  integrate(function (x) coef(m3)["b1"] / (sqrt(2 * pi) * coef(m3)["Sb"]) *
+                         exp(-((x - coef(m3)["Mb"])^2)/(2 *
+                                                        coef(m3)["Sb"]^2)),
+            0, 256)
+```
+
+The reported values agree very closely with the results of ModFit, which
+found 1484.929 and 2849.53 events, compared to my 1452.566 and 2848.404.
+The larger difference in the lower peak likely reflects differences in the
+way the debris is fitted.
+
+The CVs are just σ/μ, or `coef(m3)["Sa"]/coef(m3)["Ma"]` = `r
+coef(m3)["Sa"]/coef(m3)["Ma"]`. These match the estimates from ModFit
+within 0.1%.
 
 # flowFit#
 
@@ -361,133 +419,3 @@ uses different labels: `FS-H`, `FL3-A` etc. So we must use the lower-level
 format.
 
 
-library(flowWorkspace)
-
-
-a
-y
-y
-biocLite("flowWorkspace")
-n
-installed.packages()
-installed.packages()
-library(biocInstaller)
-library(biocinstaller)
-installed.packages()
-library(BiocInstaller)
-biocLite("openCyto")
-biocLite("flowviz")
-biocLite("flowViz")
-biocLite("flowClust")
-biocLite("ncdfFlow")
-biocLite("flowStats")
-biocLite("robCompositions")
-biocLite("GGally")
-biocLite("proto")
-biocLite("GGally")
-biocLite("scales")
-biocLite("GGally")
-biocLite("proto")
-biocLite("robCompositions")
-biocLite("flowStats")
-biocLite("flowClust")
-biocLite("flowWorkspace")
-biocLite("openCyto", dependencies = TRUE)
-library(flowWorkspace)
-flowDataPath <- system.file("extdata", package = "flowWorkspaceData"
-)
-wsfile <- list.files(flowDataPath, pattern = "manual.xml", full = TRUE)
-wsfile
-flowDataPath
-ws <- openWorkspace(wsfile)
-print(ws)
-ws
-gs <- parseWorkspace(ws, name = "T-cell", subset = 1, isNcdf = TRUE)
-gh <- gs[[1]]
-plot(gh)
-plotGate(gh)
-head(getPopStats(gs, statistic = "count"))
-head(getPopStats(gs, statistic = "freq"))
-head(getPopStats(gh, statistic = "count"))
-vignette("openCyto")
-help(package = "openCyto")
-vignette("openCytoVignette")
-gtFile <- system.file("extdata/gating_template/tcell.csv", package = "openCyto")
-dtTemplate <- fread(gtFile, autostart = 1L)
-library(data.table)
-dtTemplate <- fread(gtFile, autostart = 1L)
-dtTemplate
-gt_tcell <- gatingTemplate(gtFile, autostart = 1L)
-library(openCyto)
-gt_tcell <- gatingTemplate(gtFile, autostart = 1L)
-gt_tcell
-plot(gt_tcell)
-fcsFiles <- list.files(pattern = "CytoTrol", flowDataPath, full = TRUE)
-ncfs  <- read.ncdfFlowSet(fcsFiles)
-ncfs
-compMat <- getCompensationMatrices(gh)
-ncfs_comp <- compensate(ncfs, compMat)
-chnls <- parameters(compMat)
-transFuncts <- estimateLogicle(ncfs[[1]], channels = chnls)
-ncfs_trans <- transform(ncfs_comp, transFuncts)
-gs <- GatingSet(ncfs_trans)
-getNodes(gs[[1]])
-gating(gt_tcell, gs)
-warnings()
-plot(gs[[1]])
-dodesToHide <- c("cd8+", "cd4+"
-                , "cd4-cd8-", "cd4+cd8+"
-                , "cd4+cd8-/HLA+", "cd4+cd8-/CD38+"
-                , "cd4-cd8+/HLA+", "cd4-cd8+/CD38+"
-                , "CD45_neg/CCR7_gate", "cd4+cd8-/CD45_neg"
-                , "cd4-cd8+/CCR7+", "cd4-cd8+/CD45RA+"
-                )
-lapply(dodesToHide, function(thisNode)setNode(gs, thisNode, FALSE))
-plotGate(gs[[1]])
-lmd <- read.ncdfFlowSet("test-data/188-15_+_rad_2015-04-20_647.LMD")
-getwd()
-lmd <- read.ncdfFlowSet("test-data/188-15_+_rad_2015-04-20_647.LMD")
-lmd <- read.ncdfFlowSet("../../test-data/188-15_+_rad_2015-04-20_647.LMD")
-
-lmd1 <- read.ncdfFlowSet("../test-data/LMD good/188-15_+_rad_2015-04-20_647.LMD", dataset = 1)
-lmd2 <- read.ncdfFlowSet("../test-data/LMD good/188-15_+_rad_2015-04-20_647.LMD", dataset = 2)
-plot(lmd1)
-library(flowViz)
-plot(lmd1)
-typeof(lmd1)
-class(lmd1)
-help(package = "flowViz")
-flowPlot(lmd1)
-xyplot(lmd1)
-lm1
-lmd1
-class?ncdfFlowSet
-xyplot(lmd1)
-show(lmd1)
-class?flowSet
-length(lmd1)
-lmd1[1]
-lmd1[1][, "FS"]
-lmd1[[1]]
-plot(lmd1[[1]])
-warnings()
-lmd1[[1]]$<
-names(lmd1[[1]])
-lmd1[[1]]
-lmd1[[1]]$p1
-lmd1[[1]]$P1
-class?flowFrame
-lmd1[[1]]
-lmd1[[1]][1:4,]
-lmd1[[1]][,3]
-lmd1[[1]][,"FS"]
-lmd1[[1]][,"FS INT LIN"]
-plot(lmd1[[1]], c("FS INT LIN", "SS INT LIN"))
-library(KernSmooth)
-plot(lmd1[[1]], c("FS INT LIN", "SS INT LIN"), gridsize = c(100, 100))
-plot(lmd1[[1]], c("FS INT LIN", "SS INT LIN"), smooth=FALSE)
-plot(lmd1[[1]], c("FS INT LIN", "SS INT LIN"), smooth=FALSE)
-
-
-
-# Math

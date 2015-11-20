@@ -1,5 +1,9 @@
 # DNA Histogram Analysis in R
 
+This file is a summary of my progress on histogram analysis in R as of
+2015-11-16. However, development continues, currently in the flow.Rmd file
+and likely elsewhere as I move on to actual package development.
+
 ## Required R Packages
 ```{r setup, eval=FALSE}
 source("http://bioconductor.org/biocLite.R")
