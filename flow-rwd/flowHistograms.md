@@ -1,0 +1,187 @@
+# DNA Histogram Analysis in R
+
+## Required R Packages
+
+```r
+source("http://bioconductor.org/biocLite.R")
+biocLite()
+biocLite("BiocUpgrade")
+biocLite("flowCore")                    # core functions
+install.packages("caTools")             # for runMean
+```
+
+## Importing Data
+
+Load the data with `read.FCS`, producing individual `flowFrame` objects.
+The argument `dataset` indicates which format to extract: `1` selects FCS
+Version 2.0, `2` selections version 3.0.
+
+
+```r
+library(flowCore)
+library(caTools)
+
+lmd1 <- read.FCS("test-data/LMD good/188-15_+_rad_2015-04-20_647.LMD",
+                 dataset = 1, alter.names = TRUE)
+```
+
+## Preprocessing
+
+Extract & bin the values. Note that the highest value for each column
+contains all values that are above detection thresholds, producing a
+clipping artifact. Remove those values before fitting the models.
+
+
+```r
+fl3.trimmed <- exprs(lmd1)[, "FL3.INT.LIN"][exprs(lmd1)[, "FL3.INT.LIN"] <
+                                            max(exprs(lmd1)[, "FL3.INT.LIN"])]
+fl3.256 <- hist(fl3.trimmed, breaks = 256)
+fl3.df <- data.frame(x = runmean(fl3.256$breaks, 2, endrule = "trim"),
+                     intensity = fl3.256$counts) 
+points(fl3.df, type = 'l', col = 3)
+```
+
+![plot of chunk Preprocessing](figure/Preprocessing-1.png) 
+Convert to a dataframe, as required by `nls()`. Note that `hist()` provides
+bin boundaries as `$breaks`, and counts per bin as `$counts`. There is one
+more bin boundary than count, so we need to convert the bin boundaries into
+bin means, via `runmean()`.
+
+
+```r
+fl3.df <- data.frame(x = runmean(fl3.256$breaks, 2, endrule = "trim"),
+                     intensity = fl3.256$counts) 
+```
+
+## Model Components
+
+Build some model components. The dependent variable in each model component
+is `xx`, but is not explicitly added to the formal arguments until the
+components are collected together with `buildModel`.
+
+Model components combined by `buildModel` must have a function body that is
+composed of a single line that evaluates to the return value of the
+function. If multi-line bodies are required, as in the iterative components
+like the single cut debris model, use a wrapper function to call out to the
+multi-line function (see `singleCut` and `singleIter` for an example).
+
+Constructing models out of individual components like this is a bit
+awkward. I'm using this approach in anticipation of allowing users to
+interactively specify models by selecting components from a menu at
+run-time. Once I've worked out all the kinks, I should not need to
+hard-code all possible models, as any combination of components will be
+available for users to select.
+
+
+```r
+gaussDipA  <- function(a1 = a1, Ma = Ma, Sa = Sa, a2 = a2){
+    a1 * exp(-((xx - Ma)^2)/(2 * Sa^2)) +
+      a2 * exp(-((xx - Ma * 2)^2)/(2 * (Sa * 2)^2))
+}
+  
+gaussDipB  <- function(b1 = b1, Mb = Mb, Sb = Sb, b2 = b2){
+  b1 * exp(-((xx - Mb)^2)/(2 * Sb^2)) +
+    b2 * exp(-((xx - Mb * 2)^2)/(2 * (Sb * 2)^2))
+}
+
+singleIter <- function(SCa, intensity){
+  channels = 1:length(intensity)
+  res = vector(length = length(intensity), mode = "numeric")
+  for(x in 1:(length(intensity) - 1)){
+    for(j in (x + 1):length(channels))
+      res[x] <- res[x] + j^(1/3) * intensity[j] * 2 /
+                             (pi * j * sqrt(x/j * (1 - x/j))) 
+  }
+  res[length(res)] <- 0
+  return(SCa * res)
+}
+
+singleCut <- function(SCa, intensity){
+  singleIter(SCa, intensity)
+}
+
+buildModel <- function(models) {
+  modelComponents <- vector(mode = "character", length(models))
+  
+  model <- function(){}
+  
+  for (i in seq_along(models)){
+    modelComponents[i] <- as.character(body(get(models[[i]])))[2]
+    formals(model) <- c(formals(model), formals(models[i]))
+  }
+  
+  modelParsed <- parse(text = paste(modelComponents, collapse = " + "))
+  body(model) <- modelParsed
+  
+  formals(model) <- c(formals(model), alist(xx = ))
+  
+  return(model)
+}
+```
+
+Using these components, we can now specify a model:
+
+
+```r
+oneSampleSC <- buildModel(c("gaussDipA", "gaussDipB", "singleCut"))
+```
+
+## NLS Analysis
+
+I will have code that will construct the appropriate call to `nls`
+eventually. For now, I hard-code it to test the model:
+
+
+```r
+m3 <-
+  nls(intensity ~
+        oneSampleSC(a1 = a1, Ma = Ma, Sa = Sa, a2 = a2,
+                    b1 = b1, Mb = Mb, Sb = Sb, b2 = b2, SCa = SCa,
+                    intensity = intensity, xx = x),
+      data = fl3.df,
+      start = list(Ma = 400, a1 = 500, Sa = 10, a2 = 50,
+                   Mb = 550, b1 = 500, Sb = 10, b2 = 10,
+                   SCa = 0.1))
+```
+
+I selected the initial values by trial and error, eye-balling the function
+plotted against the raw data to get close. It should be possible to get
+reasonable values without human input, based on peaks in the data.
+
+
+```r
+hist(fl3.trimmed, breaks = 256, border = 0, col = "lightgray",
+     main = "", xlab = "channel", ylab = "counts")
+lines(x = fl3.df$x, y = predict(m3), col = 2)
+```
+
+![Fitted Model](figure/Fitted Model-1.png) 
+
+
+```r
+hist(fl3.trimmed, breaks = 256, border = 0, col = "lightgray",
+     xlab = "channel", ylab = "counts", main = "")
+lines(x = fl3.df$x, y = singleCut(SCa = coef(m3)["SCa"],
+                                  intensity = fl3.df$intensity), col = 2)
+xx <- fl3.df$x                          # awkward!!
+lines(x = fl3.df$x, y = gaussDipA(Ma = coef(m3)["Ma"], a1 = coef(m3)["a1"],
+                                  Sa = coef(m3)["Sa"], a2 = coef(m3)["a2"]),
+      col = 3)
+lines(x = fl3.df$x, y = gaussDipB(Mb = coef(m3)["Mb"], b1 = coef(m3)["b1"],
+                                  Sb = coef(m3)["Sb"], b2 = coef(m3)["b2"]),
+      col = 4)
+legend(legend = c("Internal Standard", "Sample", "Debris"),
+       col = c(3, 4, 2), x = "topright", pch = 1)
+```
+
+![Fitted Model Components](figure/Fitted Model Components-1.png) 
+
+## TODO
+
+1. Starting parameters: estimate from data or prompt user for values from
+   visual inspection of plots 
+2. Auto-generate nls call from model specification
+3. Additional model components: Multi-cut debris, broadened polygons for
+   S-phase
+   4. Statistical summaries - nuclei per peak, CVs etc.
+   

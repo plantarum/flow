@@ -1,0 +1,26 @@
+# Data Slots
+
+## data
+    
+The original flowFrame object. Could extract the actual column we use to
+save on storage space, but a typical(?) object is only about 0.58 MB (this
+from `object.size(parent.fitting.cfse)` in the flowFit vignette).
+
+At some point we need to drop the highest value from the data column, which
+is distorted by clipping. Not sure how this should be done. Probably best
+to leave the data as-is here.
+
+## channel
+
+character, the name of the column from data to use in the analysis
+
+## bins
+
+numeric, how many bins to use for the data analysis. Paul Kron prefers 256,
+but it should probably depend on how much data we have. This is a form of
+smoothing, and too much will inflate the model fit. Too little and the
+model fit may be reduced by too much granularity in the data. That is,
+having 300 counts in one bin, vs having three adjacent (narrower) bins with
+150, 0 and 150 counts. This is probably something that can be tuned as a
+model parameter, if we were so inclined.
+    

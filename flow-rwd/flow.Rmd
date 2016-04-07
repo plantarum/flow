@@ -7,7 +7,7 @@ format is described as:
 
 > Flow Cytometric Standard (FCS) file format for listmode and histogram
 > files. Listmode files contain an FCS 2.0 dataset followed by an FCS 3.0
-> dataset. 
+> dataset.
 
 The structure is:
 
@@ -118,7 +118,7 @@ clipping artifact. Clip this value before fitting the models.
 
 ```{r}
 fl3.trimmed <- exprs(lmd1)[, "FL3.INT.LIN"][exprs(lmd1)[, "FL3.INT.LIN"] <
-                                            max(exprs(lmd1)[, "FL3.INT.LIN"])]
+                                              max(exprs(lmd1)[, "FL3.INT.LIN"])]
 ## Set one more break than the number of channels we want!
 fl3.1024 <- hist(fl3.trimmed, breaks = seq(from = 0, to=1024, by = 1))
 fl3.256 <- hist(fl3.trimmed, breaks = seq(from = 0, to = 1024, by = 4))
@@ -214,6 +214,131 @@ oneSampleSC <- buildModel(c("gaussDipA", "gaussDipB", "singleCut"))
 
 ```
 
+## Initial Estimates
+
+Peak height = 0.4 * a / sd
+
+a = peak height * sd / 0.4
+
+sd = peak height / (0.4 * a)
+
+sd = 0.05 * peak mean (based on the assumption CV is 5%)
+
+```{r peakFinder}
+library(caTools)
+
+findPeaks <- function(dat, window){
+  localMax <- runmax(dat, k = window)
+  isMax <- localMax == dat
+
+  for(i in seq_along(isMax)){
+    ## Make sure only the first max value within a given window is kept:
+    if(isMax[i])
+      isMax[(i + 1):(i + window)] <- FALSE
+  }
+
+  ## The for loop may extend the length of isMax beyond the initial value,
+  ## so trim it back to size. The extra values are all FALSE, so no risk of
+  ## lost data here.
+  isMax <- isMax[1:length(dat)]
+  maxVals <- dat[isMax]
+  cbind(mean = (1:length(dat))[isMax], height = maxVals)
+}
+
+oneSampleSC <-
+  function (xx, a1, Ma, Sa, a2, b1, Mb, Sb, b2, SCa, intensity) { 
+    a1/(sqrt(2 * pi) * Sa) * exp(-((xx - Ma)^2)/(2 * Sa^2)) +
+      a2/(sqrt(2 * pi) * Sa * 2) * exp(-((xx - Ma * 2)^2)/(2 * (Sa * 2)^2)) +
+        b1/(sqrt(2 * pi) * Sb) * exp(-((xx - Mb)^2)/(2 * Sb^2)) +
+        b2/(sqrt(2 * pi) * Sb * 2) * exp(-((xx - Mb * 2)^2)/(2 * (Sb * 2)^2)) +
+        singleIter(SCa, intensity) 
+}
+
+oneSampleSCInit <- function(mCall, LHS, data) {
+  ## Not sure we need this fancy stuff, given we have the data already in
+  ## hand, and in order:
+  
+  xy <- sortedXyData(mCall[["predictor"]], LHS, data)
+  xy <- sortedXyData(mCall[["predictor"]], LHS, data) 
+  #xy <- data[, "x", "intensity"]
+  peaks <- findPeaks(xy[, "y"], 20)     # WARNING: window size hardcoded 
+                                        # here!
+
+  peaks <- peaks[order(peaks[, "height"], decreasing = TRUE)]
+  Ma <- peaks[1, "mean"]
+  Sa <- Ma / 20                         # assume CV = 0.05
+  a1 <- peaks[1, "height"] * Sa / 0.4
+  a2 <- xy[peaks[1, "mean"] * 2, "intensity"] * Sa * 2 / 0.4
+  Mb <- peaks[2, "mean"]
+  Sb <- Mb / 20
+  b1 <- peaks[2, "height"] * Sb / 0.4
+  b2 <- xy[peaks[2, "mean"] * 2, "intensity"] * Sb * 2 / 0.4  
+
+  SCa <- 0.1                            # just a wild guess for now
+  value <- c(a1, Ma, Sa, a2, b1, Mb, Sb, b2, SCa)
+  names(value) <-
+    mCall[c("a1", "Ma", "Sa", "a2", "b1", "Mb", "Sb", "b2", "SCa")] 
+  value
+}
+
+oneSampleSCStart <- function(bin, intensity, window = 20) {
+  xy <- cbind(mean = bin, intensity = intensity)
+  peaks <- findPeaks(intensity, window) 
+  peaks <- peaks[order(peaks[, "height"], decreasing = TRUE), ]
+  Ma <- as.vector(peaks[1, "mean"])
+  Sa <- as.vector(Ma / 20)                         # assume CV = 0.05
+  a1 <- as.vector(peaks[1, "height"] * Sa / 0.4)
+  ## make sure the G2 peak is in range:
+  if((peaks[1, "mean"] * 2) > max(bin))
+    a2 <- 0
+  else
+    a2 <- xy[peaks[1, "mean"] * 2, "intensity"] * Sa * 2 / 0.4
+
+  Mb <- as.vector(peaks[2, "mean"])
+  Sb <- as.vector(Mb / 20)
+  b1 <- as.vector(peaks[2, "height"] * Sb / 0.4)
+
+  if((peaks[2, "mean"] * 2) > max(bin))
+    b2 <- 0
+  else
+    b2 <- as.vector(xy[peaks[2, "mean"] * 2, "intensity"] * Sb * 2 / 0.4)
+
+  SCa <- 0.1                            # just a wild guess for now
+  list(a1 = a1, Ma = Ma, Sa = Sa, a2 = a2, b1 = b1, Mb = Mb, Sb = Sb,
+       b2 = b2, SCa = SCa)
+}
+
+
+SSoneSSC <- selfStart(oneSampleSC, oneSampleSCInit,
+                      c("a1", "Ma", "Sa", "a2", "b1", "Mb", "Sb", "b2",
+                        "SCa"))  
+
+m3SS <- nls(intensity ~ SSoneSSC(a1, Ma, Sa, a2, b1, Mb, Sb, b2, SCa,
+            intensity = intensity, xx = x),
+            data = fl3.df)
+
+
+m3SS <- nls(intensity ~ oneSampleSC(a1, Ma, Sa, a2, b1, Mb, Sb, b2, SCa,
+            intensity = intensity, xx = x), start =
+            oneSampleSCStart(fl3.df$x, fl3.df$intensity),
+            data = fl3.df)
+
+startvals <- oneSampleSCStart(fl3.df$x, fl3.df$intensity)
+
+m3SS <- nls(intensity ~ oneSampleSC(a1, Ma, Sa, a2, b1, Mb, Sb, b2, SCa,
+            intensity = intensity, xx = x), start = startvals,
+            data = fl3.df)
+
+```
+
+This didn't work out. Perhaps scrap the use of `selfStart`, and roll my own
+function that calculates the starting values directly. I suspect I'm going
+to have problems due to the inclusion of the intensity values as both
+response, predictor in this model. I know the math now, so can just code it
+up in a naive way without having to reconcile the innards of `selfStart`
+with a multivariate nls.
+
+
 ## Nonlinear regression
 
 ```{r}
@@ -233,6 +358,17 @@ m3 <-
       start = list(Ma = 97, a1 = 3000, Sa = 5, a2 = 500,
                    Mb = 135, b1 = 5000, Sb = 5, b2 = 10,
                    SCa = 0.1))
+
+m3b <-
+  nls(intensity ~
+        oneSampleSC(a1 = a1, Ma = Ma, Sa = Sa, a2 = a2,
+                    b1 = b1, Mb = Mb, Sb = Sb, b2 = b2, SCa = SCa,
+                    intensity = intensity, xx = x),
+      data = fl3.df,
+      start = list(Ma = 100, a1 = 1500 / 0.4, Sa = 5, a2 = 500,
+                   Mb = 135, b1 = 135 * 0.05 * 450 / 0.4, Sb = 135 * 0.05,
+                   b2 = 10, SCa = 0.1))
+
 
 ## The following doesn't work yet, I suspect because the optimizer attempts
 ## negative values for the broadened trapezoid heights (the true values are
@@ -258,22 +394,22 @@ polygon(x = c(fl3.df$x, 257), y = c(fl3.df$intensity, 0),
                 col = "lightgray", border = NA) 
 
 ## Complete model
-lines(x = fl3.df$x, y = predict(m3), col = 2)
+lines(x = fl3.df$x, y = predict(m3SS), col = 2)
 
 ## Debris:
-lines(x = fl3.df$x, y = singleCut(SCa = coef(m3)["SCa"],
+lines(x = fl3.df$x, y = singleCut(SCa = coef(m3SS)["SCa"],
                                   intensity = fl3.df$intensity), col = 3,
       lty = 2, lwd = 2)
 xx <- fl3.df$x                          # awkward!!
 
 ## Internal Standard:
-lines(x = fl3.df$x, y = gaussDipA(Ma = coef(m3)["Ma"], a1 = coef(m3)["a1"],
-                                  Sa = coef(m3)["Sa"], a2 = coef(m3)["a2"]),
+lines(x = fl3.df$x, y = gaussDipA(Ma = coef(m3SS)["Ma"], a1 = coef(m3SS)["a1"],
+                                  Sa = coef(m3SS)["Sa"], a2 = coef(m3SS)["a2"]),
       col = 4)
 
 ## Sample:
-lines(x = fl3.df$x, y = gaussDipB(Mb = coef(m3)["Mb"], b1 = coef(m3)["b1"],
-                                  Sb = coef(m3)["Sb"], b2 = coef(m3)["b2"]),
+lines(x = fl3.df$x, y = gaussDipB(Mb = coef(m3SS)["Mb"], b1 = coef(m3SS)["b1"],
+                                  Sb = coef(m3SS)["Sb"], b2 = coef(m3SS)["b2"]),
       col = 5)
 
 legend(legend = c("Internal Standard", "Sample", "Debris", "Complete Model"),
@@ -306,6 +442,19 @@ gaussBEvents <-
                          exp(-((x - coef(m3)["Mb"])^2)/(2 *
                                                         coef(m3)["Sb"]^2)),
             0, 256)
+
+gaussAEvents <-
+  integrate(function (x) coef(m3SS)["a1"] / (sqrt(2 * pi) * coef(m3SS)["Sa"]) *
+                         exp(-((x - coef(m3SS)["Ma"])^2)/(2 *
+                                                        coef(m3SS)["Sa"]^2)),
+            0, 256)
+
+gaussBEvents <-
+  integrate(function (x) coef(m3SS)["b1"] / (sqrt(2 * pi) * coef(m3SS)["Sb"]) *
+                         exp(-((x - coef(m3SS)["Mb"])^2)/(2 *
+                                                        coef(m3SS)["Sb"]^2)),
+            0, 256)
+
 ```
 
 The reported values agree very closely with the results of ModFit, which
