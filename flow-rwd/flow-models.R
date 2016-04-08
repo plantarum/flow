@@ -49,11 +49,17 @@ findPeaks <- function(dat, window){
   localMax <- runmax(dat, k = window)
   isMax <- localMax == dat
   maxVals <- dat[isMax]
-  cbind(mean = (1:length(dat))[isMax], height = maxVals)
+  res <- cbind(mean = (1:length(dat))[isMax], height = maxVals)
+
+  ## remove low peaks (noise). Probably a better threshold than mean could
+  ## be used?
+  res <- res[res[, "height"] > mean(dat), ]
+  res
+
 }
 
-cleanPeaks <- function(peaks, num, window){
-  ## Pick out the top num peaks for use as starting values
+cleanPeaks <- function(peaks, window){
+  ## Remove ties and multiple peaks for histogram analysis
 
   ## Screen out any ties - if two peaks have the same height, and are
   ## within the same 'window', we need to drop one.
@@ -66,6 +72,9 @@ cleanPeaks <- function(peaks, num, window){
 
   peaks <- peaks[order(peaks[,2], decreasing = TRUE), ]
 
+  ## eliminate the debris field?
+  peaks <- peaks[which(peaks[, "mean"] > 40), ]
+
   drop <- numeric()
   for(i in 2: nrow(peaks)){
     if((peaks[i-1, "height"] == peaks[i, "height"]) &
@@ -75,18 +84,38 @@ cleanPeaks <- function(peaks, num, window){
     }
   }
 
-  peaks <- peaks[-drop, ]
-
-  out <- matrix(NA, nrow = num, ncol = 2)
-
-  numc <- num
-  while(nrow(peaks) > 0 & numc > 0){
-    for(i in 1:(nrow(peaks) - 1)){
-      if(peaks[1, "mean"] ... 
-      
+  if(length(drop) > 0){                  # there was at least one tie 
+    peaks <- peaks[-drop, ]
+  }
   
-}
+  out <- matrix(NA, nrow = 0, ncol = 2)
 
+  while(nrow(peaks) > 0){
+    ## which peaks are half or double the size of the first peak:
+    paircheck <-
+      which(((peaks[, "mean"] < 0.53 * peaks[1, "mean"]) &
+             (peaks[, "mean"] > 0.47 * peaks[1, "mean"])) |
+            ((peaks[, "mean"] < 2.13 * peaks[1, "mean"]) &
+             (peaks[, "mean"] > 1.89 * peaks[1, "mean"])))
+    ## Add the first peak to that list:
+    paircheck <- c(1, paircheck)
+    if(length(paircheck) == 1){            # no pairs
+      out <- rbind(out, peaks[1, ])
+      peaks <- peaks[-1, , drop = FALSE]              # remove peak
+    } else {                            # pick the smallest of the pair
+      out <- rbind(out, peaks[paircheck[which.min(peaks[paircheck, "mean"])], ])
+      peaks <- peaks[-paircheck, , drop = FALSE]      # remove pair
+    }
+  }
+
+  if(is.vector(peaks))
+    out <- rbind(out, peaks)
+
+  rownames(out) <- NULL
+  
+  out
+}
+  
 oneSampleSC <-
   function (xx, a1, Ma, Sa, a2, b1, Mb, Sb, b2, SCa, intensity) { 
     ## a1 == highest G1 peak
@@ -111,54 +140,27 @@ oneSampleSCInit <- function(mCall, LHS, data) {
                                         # argument? 
   peaks <- findPeaks(xy[, "y"], window)     
 
-  peaks <- peaks[order(peaks[, "height"], decreasing = TRUE),]
+  peaks <- cleanPeaks(peaks, window)
 
-  ## Is the first peak a G2?
-  ## - start with the fifth peak and work up
-  ## - if there are multiple peaks in the range, we keep the highest one.
-  peakOne <- NULL
-  for(i in 5:2){                       
-    if((peaks[i, "mean"] < 0.55 * peaks[1, "mean"]) &
-       (peaks[i, "mean"] > 0.45 * peaks[1, "mean"])){
-      peakOne <- i
-    }
-  }
-
-  if(is.null(peakOne)){
-    peakOne <- 1
-  }
-  
-  Ma <- peaks[peakOne, "mean"]  
+  Ma <- peaks[1, "mean"]  
   Sa <- Ma / 20                         # assume CV = 0.05
-  a1 <- peaks[peakOne, "height"] * Sa / 0.4
+  a1 <- peaks[1, "height"] * Sa / 0.4
 
   ## Is a2 off the chart?
-  if((peaks[peakOne, "mean"] * 2) > max(xy[1, ]))
+  if((peaks[1, "mean"] * 2) > max(xy[ ,"x"]))
     a2 <- 0
   else
-    a2 <- xy[peaks[peakOne, "mean"] * 2, "intensity"] * Sa * 2 / 0.4
+    a2 <- xy[peaks[1, "mean"] * 2, "y"] * Sa * 2 / 0.4
 
   peakTwo <- 
-  
-  ## Are the two highest peaks the G1 and G2 from the same sample?
-  if((peaks[peakTwo, "mean"] < 2.1 * peaks[peakOne, "mean"] &
-      peaks[peakTwo, "mean"] > 1.9 * peaks[peakOne, "mean"]) |
-     (peaks[peakOne, "mean"] < 2.1 * peaks[peakTwo, "mean"] &
-      peaks[peakOne, "mean"] > 1.9 * peaks[peakTwo, "mean"]))
-    peaks <- peaks[-peakTwo, ]
-
-  ## Are the two highest peaks tied values from the same peak?
-  while((abs(peaks[2, "mean"] - peaks[1, "mean"]) <  window ) &
-        (peaks[1, "height"] == peaks[2, "height"]))
-    peaks <- peaks[-2, ]
   
   Mb <- peaks[2, "mean"]
   Sb <- Mb / 20
   b1 <- peaks[2, "height"] * Sb / 0.4
-  if((peaks[2, "mean"] * 2) > max(xy[1, ]))
+  if((peaks[2, "mean"] * 2) > max(xy[,"x"]))
     b2 <- 0
   else
-    b2 <- as.vector(xy[peaks[2, "mean"] * 2, "intensity"] * Sb * 2 / 0.4)
+    b2 <- as.vector(xy[peaks[2, "mean"] * 2, "y"] * Sb * 2 / 0.4)
 
   SCa <- 0.1                            # just a wild guess for now
   value <- c(a1, Ma, Sa, a2, b1, Mb, Sb, b2, SCa)
@@ -305,6 +307,15 @@ print.flowHist <- function(self){
 fHnls <- function(fh){
   nls(intensity ~ SSoneSSC(a1, Ma, Sa, a2, b1, Mb, Sb, b2, SCa,
                            intensity = intensity, xx = x),
+      data = fh$data)
+}
+
+fHnlsP <- function(fh){
+  nls(intensity ~ SSoneSSC(a1, Ma, Sa, a2, b1, Mb, Sb, b2, SCa,
+                           intensity = intensity, xx = x),
+      algorithm = "port",
+      lower = c(a1 = 0, Ma = 0, Sa = 0, a2 = 0, b1 = 0, Mb = 0, Sb = 0,
+                b2 = 0, SCa = 0),
       data = fh$data)
 }
 

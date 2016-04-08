@@ -25,7 +25,29 @@ setwd("~/research/techniques/flow/flow-rwd/test-data/camelina_test")
 lmdFiles <- list.files()
 
 out <- list()
+
+i <- lmdFiles[1]
+i <- lmdFiles[2]
+i <- lmdFiles[3]
+i <- lmdFiles[4]
+i <- lmdFiles[6]
+
+## Problem!! only two peaks, one twice the other -- good data?
+i <- lmdFiles[5]
+
+## Singular gradient? Initial values look ok :/
+i <- lmdFiles[7]
+
+i <- lmdFiles[8]
+i <- lmdFiles[9]
+i <- lmdFiles[10]
+i <- lmdFiles[11]
+i <- lmdFiles[12]
+i <- lmdFiles[13]
+
+
 for(i in lmdFiles){
+
   raw <- read.FCS(i, dataset = 1, alter.names = TRUE)
   fhi <- flowHist(raw, "FL3.INT.LIN")
   print(fhi)
