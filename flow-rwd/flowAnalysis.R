@@ -4,9 +4,26 @@ fhAnalyze <- function(fh){
   fh$nls <- fhNLS(fh)
   fh$counts <- fhCount(fh)
   fh$cv <- fhCV(fh)
+  fh$RCS <- fhRCS(fh)
   fh
 }
 
+fhRCS <- function(fh){
+  obs <- fh$data$intensity
+  exp <- predict(fh$nls)
+  zeros <- zapsmall(exp, digits = 5) == 0
+  obs <- obs[!zeros]
+  exp <- exp[!zeros]
+  chi <- sum(((obs - exp)^2) / exp)
+
+  n <- length(obs)
+  m <- length(formals(fh$model)) - 2    # don't count xx or intensity as
+                                        # parameters
+
+  chi/summary(fh$nls)$df[2]
+}
+                  
+                  
 fhNLS <- function(fh){
   model <- fh$model
   form1 <- paste("intensity ~ model(")
