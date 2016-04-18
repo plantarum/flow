@@ -33,7 +33,8 @@ fhNLS <- function(fh){
   form3 <- ", intensity = intensity, xx = x)"
   form <- as.formula(paste(form1, args, form3))
 
-  eval(call("nls", form, start = fh$init, data = fh$data)) 
+  eval(call("nls", form, start = fh$init, data = fh$data,
+            algorithm = "port", lower = 0.000001 )) 
 }
 
 fhCount <- function(fh, lower = 0, upper = 256, subdivisions = 1000){

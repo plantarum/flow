@@ -21,6 +21,27 @@ fB2 <- function(b2, Sb, Mb, xx){
 }
 attr(fB2, "compName") <- "fB2"
 
+derf <- function(x1, x2, s1, s2, x){
+  erf <- function(x) 2 * pnorm(x * sqrt(2)) - 1
+  (erf((x2 - x) / sqrt(s2)) - erf((x1 -x) / sqrt(s1)))/ 2
+}  
+
+broadenedTrapezoid <- function(x1, x2, t1, t2, s1, s2, xx){
+  (((t2 - t1)/(x1)) * (xx - x2) + t2) * derf(x1, x2, s1, s2, xx)
+}
+
+btA <- function(Ma, t1a, t2a, s1a, s2a, xx){
+  broadenedTrapezoid(x1 = Ma, x2 = min(Ma * 2, 255), t1 = t1a, t2 = t2a,
+                     s1 = s1a, s2 = s2a, xx)  
+}
+attr(btA, "compName") <- "btA"
+
+btB <- function(Mb, t1b, t2b, s1b, s2b, xx){
+  broadenedTrapezoid(x1 = Mb, x2 = min(Mb * 2, 255), t1 = t1b, t2 = t2b,
+                     s1 = s1b, s2 = s2b, xx) 
+}
+attr(btB, "compName") <- "btB"
+
 ## Single-cut debris model
 ## 
 ## S(x) = a ⱼ₌ₓ₊₁∑ⁿ ³√j YⱼPₛ(j, x)
@@ -68,9 +89,7 @@ singleCutVect <- Vectorize(singleCutBase, "xx")
 singleCut <- function(SCa, intensity, xx){
   singleCutVect(SCa, intensity, xx)
 }
-
 attr(singleCut, "compName") <- "single cut"
-
 
 flowInit <- function(fh) {
   xy <- fh$data
@@ -86,8 +105,12 @@ flowInit <- function(fh) {
     Ma <- peaks[1, "mean"]  
     Sa <- Ma / 20                         # assume CV = 0.05
     a1 <- peaks[1, "height"] * Sa / 0.4
-    tmpval <- c(Ma, Sa, a1)
-    names(tmpval) <- c("Ma", "Sa", "a1")
+    t1a <- peaks[1, "height"] / 100
+    t2a <- t1a
+    s1a <- 1
+    s2a <- 1
+    tmpval <- c(Ma, Sa, a1, t1a, t2a, s1a, s2a)
+    names(tmpval) <- c("Ma", "Sa", "a1", "t1a", "t2a", "s1a", "s2a")
     value <- c(value, tmpval)
   }
 
@@ -109,8 +132,12 @@ flowInit <- function(fh) {
     Mb <- peaks[2, "mean"]
     Sb <- Mb / 20
     b1 <- peaks[2, "height"] * Sb / 0.4
-    tmpval <- c(Mb, Sb, b1)
-    names(tmpval) <- c("Mb", "Sb", "b1")
+    t1b <- peaks[2, "height"] / 100
+    t2b <- t1b
+    s1b <- 1
+    s2b <- 1
+    tmpval <- c(Mb, Sb, b1, t1b, t2b, s1b, s2b)
+    names(tmpval) <- c("Mb", "Sb", "b1", "t1b", "t2b", "s1b", "s2b")
     value <- c(value, tmpval)
   }
 
@@ -136,85 +163,6 @@ flowInit <- function(fh) {
   as.list(value)
 }
 
-
-
-flowSSorig <- function(mCall, LHS, data) {
-##################################################################
-## The original version of flowSS, designed to be used as a nls ##
-## self-starting function                                       ##
-##################################################################
-
-  ## Not sure we need this fancy stuff, given we have the data already in
-  ## hand, and in order:
-  
-  xy <- sortedXyData(mCall[["xx"]], LHS, data)
-  ##xy <- data[, "x", "intensity"]
-  window = 20                           # should window be a function
-  smooth = 20 # argument? 
-
-  peaks <- attr(data, "peaks")
-  peaks <- findPeaks(xy[, "y"], window, smooth)     
-  peaks <- cleanPeaks(peaks, window)
-
-  params <- names(mCall)
-  params <- params[-which(params %in% c("", "xx", "intensity"))]
-  value <- c()
-  
-  if("Ma" %in% params) {
-    ## Any model with Ma will require all three of these parameters:
-    Ma <- peaks[1, "mean"]  
-    Sa <- Ma / 20                         # assume CV = 0.05
-    a1 <- peaks[1, "height"] * Sa / 0.4
-    tmpval <- c(Ma, Sa, a1)
-    names(tmpval) <- c("Ma", "Sa", "a1")
-    value <- c(value, tmpval)
-  }
-
-  if("a2" %in% params) {
-    ## Is a2 off the chart? It shouldn't be! Models with an a2 peak can
-    ## break if the a2 peak is beyond the data range.
-    if((peaks[1, "mean"] * 2) > max(xy[ ,"x"])){
-      warning("a2 peak appears to be out of range")
-      a2 <- 0
-    } else {
-      a2 <- xy[peaks[1, "mean"] * 2, "y"] * Sa * 2 / 0.4
-    }
-    tmpval <- c(a2)
-    names(tmpval) <- c("a2")
-    value <- c(value, tmpval)
-  }
-
-  if("Mb" %in% params){
-    Mb <- peaks[2, "mean"]
-    Sb <- Mb / 20
-    b1 <- peaks[2, "height"] * Sb / 0.4
-    tmpval <- c(Mb, Sb, b1)
-    names(tmpval) <- c("Mb", "Sb", "b1")
-    value <- c(value, tmpval)
-  }
-
-  if("b2" %in% params) {
-    if((peaks[2, "mean"] * 2) > max(xy[,"x"])){
-      warning("b2 peak appears to be out of range")
-      b2 <- 0
-    } else {
-      b2 <- as.vector(xy[peaks[2, "mean"] * 2, "y"] * Sb * 2 / 0.4)
-    }
-    tmpval <- c(b2)
-    names(tmpval) <- c("b2")
-    value <- c(value, tmpval)
-  }
-
-  if("SCa" %in% params){
-    SCa <- 0.1                            # just a wild guess for now
-    tmpval <- c(SCa)
-    names(tmpval) <- c("SCa")
-    value <- c(value, tmpval)
-  }
-
-  value
-}
-
 makeModel <- function(components, env = parent.frame()){
 
   args <- unlist(lapply(components, formals))
@@ -233,24 +181,3 @@ makeModel <- function(components, env = parent.frame()){
 
 }
 
-makeModelorig <- function(components, env = parent.frame()){
-########################################################
-## Original version, returns a self-starting function ##
-########################################################
-  args <- unlist(lapply(components, formals))
-  args <- args[unique(names(args))]
-  
-  bodList <- lapply(components, FUN = body)
-  bod <- bodList[[1]]
-  bodList <- bodList[-1]
-
-  while(length(bodList) > 0){
-    bod <- call("+", bod, bodList[[1]])
-    bodList <- bodList[-1]
-  }
-
-  fun <- eval(call("function", as.pairlist(args), bod), env)
-
-  params <- names(args)[-which(names(args) %in% c("", "xx", "intensity"))]
-  selfStart(fun, flowSS, parameters = params) 
-}

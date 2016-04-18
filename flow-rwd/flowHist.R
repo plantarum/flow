@@ -41,7 +41,7 @@ flowHist <- function(FCS = NULL, FILE = NULL, CHANNEL,
     res$peaks <- cleanPeaks(findPeaks(res, window = window, smooth = smooth),
                             window = window)  
 
-  res$comps <- list(singleCut, fA1, fB1)
+  res$comps <- list(singleCut, fA1, fB1, btA, btB)
 
   if(res$peaks[1, "mean"] * 2 <= nrow(res$data))
     res$comps <- c(res$comps, fA2)
@@ -95,6 +95,10 @@ print.flowHist <- function(self){
     message(paste("CV B:", round(self$cv$CVb, 3)))
     message(paste("Ratio:", round(self$cv$CI[1], 3), "/",
                   round(1/self$cv$CI[1], 3))) 
+  }
+
+  if(!is.null(self$RCS)){
+    message(paste("RCS:", round(self$RCS, 3)))
   }
 
 }
