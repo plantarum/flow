@@ -1,6 +1,7 @@
 ## Functions for creating and viewing flowHist objects.
 flowHist <- function(FCS = NULL, FILE = NULL, CHANNEL,
-                     bins = 256, maxBins = 1024){ 
+                     bins = 256, maxBins = 1024, window = 20,
+                     smooth = 20, pick = FALSE){  
   ## You probably want to subdivide the bins evenly. i.e., if there are
   ## 1024 bins in the data, use 128, 256, 512 bins
   if((1024 %% bins) != 0)
@@ -34,19 +35,24 @@ flowHist <- function(FCS = NULL, FILE = NULL, CHANNEL,
               nls = NULL, standard = NULL,
               file = FCS@description$GUID)
 
-  peaks <- cleanPeaks(findPeaks(res, 20, 20), 20)  
+  if(pick)
+    res$peaks <- pickPeaks(res)
+  else
+    res$peaks <- cleanPeaks(findPeaks(res, window = window, smooth = smooth),
+                            window = window)  
 
-  attr(res$data, "peaks") <- peaks
   res$comps <- list(singleCut, fA1, fB1)
 
-  if(peaks[1, "mean"] * 2 <= nrow(res$data))
+  if(res$peaks[1, "mean"] * 2 <= nrow(res$data))
     res$comps <- c(res$comps, fA2)
 
-  if(peaks[2, "mean"] * 2 <= nrow(res$data))
+  if(res$peaks[2, "mean"] * 2 <= nrow(res$data))
     res$comps <- c(res$comps, fB2)
 
-  res$model = makeModel(res$comps, env = globalenv())
-  
+  res$model <- makeModel(res$comps)
+  ##res$model = makeModel(res$comps, env = globalenv())
+
+  res$init <- flowInit(res)
   class(res) <- "flowHist"
   
   return(res)
@@ -61,15 +67,8 @@ print.flowHist <- function(self){
   message("Model components: ",
           paste(unlist(lapply(fh1$comps,
                               FUN = function(x) attr(x, "compName"))),
-                collapse = ", ") 
-          )
+                collapse = ", "))
   
-  ## if(is.null(self$model)){
-  ##   message("No model selected")
-  ## } else {
-  ##   message(paste("Model: ", substitute(self$model)))
-  ## }
-
   if(is.null(self$nls)){
     message("Not fit")
   } else {
@@ -100,17 +99,24 @@ print.flowHist <- function(self){
 
 }
 
-plot.flowHist <- function(self, init = FALSE, nls = TRUE, comps = TRUE){
-  plot(self$data$intensity, type = 'n', main = self$file)
+plotFH <- function(self, ...){
+  ## plots the raw data for a flowHist object
+  plot(self$data$intensity, type = 'n', main = self$file,
+       ylab = "Intensity", xlab = "channel", ...)
   polygon(x = c(self$data$x, max(self$data$x) + 1), y = c(self$data$intensity, 0),
           col = "lightgray", border = NA)
+}
+  
 
+plot.flowHist <- function(self, init = FALSE, nls = TRUE, comps = TRUE){
+  plotFH(self)
+  
   if(init){
-    iv <- fHcall(self, "getInitial")
+    ##iv <- fHcall(self, "getInitial")
     yy <- do.call(self$model,
                   args = c(list(intensity = self$data$intensity,
                                 xx = self$data$x),
-                           as.list(fHcall(self, "getInitial"))))
+                           self$init))
 
     lines(x = self$data$x,
           y = yy, 

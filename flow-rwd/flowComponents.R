@@ -71,7 +71,79 @@ singleCut <- function(SCa, intensity, xx){
 
 attr(singleCut, "compName") <- "single cut"
 
-flowSS <- function(mCall, LHS, data) {
+
+flowInit <- function(fh) {
+  xy <- fh$data
+
+  peaks <- fh$peaks
+
+  params <- names(formals(fh$model))
+  params <- params[-which(params %in% c("", "xx", "intensity"))]
+  value <- c()
+  
+  if("Ma" %in% params) {
+    ## Any model with Ma will require all three of these parameters:
+    Ma <- peaks[1, "mean"]  
+    Sa <- Ma / 20                         # assume CV = 0.05
+    a1 <- peaks[1, "height"] * Sa / 0.4
+    tmpval <- c(Ma, Sa, a1)
+    names(tmpval) <- c("Ma", "Sa", "a1")
+    value <- c(value, tmpval)
+  }
+
+  if("a2" %in% params) {
+    ## Is a2 off the chart? It shouldn't be! Models with an a2 peak can
+    ## break if the a2 peak is beyond the data range.
+    if((peaks[1, "mean"] * 2) > max(xy[ ,"x"])){
+      warning("a2 peak appears to be out of range")
+      a2 <- 0
+    } else {
+      a2 <- xy[peaks[1, "mean"] * 2, "intensity"] * Sa * 2 / 0.4
+    }
+    tmpval <- c(a2)
+    names(tmpval) <- c("a2")
+    value <- c(value, tmpval)
+  }
+
+  if("Mb" %in% params){
+    Mb <- peaks[2, "mean"]
+    Sb <- Mb / 20
+    b1 <- peaks[2, "height"] * Sb / 0.4
+    tmpval <- c(Mb, Sb, b1)
+    names(tmpval) <- c("Mb", "Sb", "b1")
+    value <- c(value, tmpval)
+  }
+
+  if("b2" %in% params) {
+    if((peaks[2, "mean"] * 2) > max(xy[,"x"])){
+      warning("b2 peak appears to be out of range")
+      b2 <- 0
+    } else {
+      b2 <- as.vector(xy[peaks[2, "mean"] * 2, "intensity"] * Sb * 2 / 0.4)
+    }
+    tmpval <- c(b2)
+    names(tmpval) <- c("b2")
+    value <- c(value, tmpval)
+  }
+
+  if("SCa" %in% params){
+    SCa <- 0.1                            # just a wild guess for now
+    tmpval <- c(SCa)
+    names(tmpval) <- c("SCa")
+    value <- c(value, tmpval)
+  }
+
+  as.list(value)
+}
+
+
+
+flowSSorig <- function(mCall, LHS, data) {
+##################################################################
+## The original version of flowSS, designed to be used as a nls ##
+## self-starting function                                       ##
+##################################################################
+
   ## Not sure we need this fancy stuff, given we have the data already in
   ## hand, and in order:
   
@@ -145,6 +217,26 @@ flowSS <- function(mCall, LHS, data) {
 
 makeModel <- function(components, env = parent.frame()){
 
+  args <- unlist(lapply(components, formals))
+  args <- args[unique(names(args))]
+  
+  bodList <- lapply(components, FUN = body)
+  bod <- bodList[[1]]
+  bodList <- bodList[-1]
+
+  while(length(bodList) > 0){
+    bod <- call("+", bod, bodList[[1]])
+    bodList <- bodList[-1]
+  }
+
+  eval(call("function", as.pairlist(args), bod), env)
+
+}
+
+makeModelorig <- function(components, env = parent.frame()){
+########################################################
+## Original version, returns a self-starting function ##
+########################################################
   args <- unlist(lapply(components, formals))
   args <- args[unique(names(args))]
   

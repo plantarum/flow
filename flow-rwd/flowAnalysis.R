@@ -1,42 +1,23 @@
 ## Functions for analyzing flowHist datasets
 
 fhAnalyze <- function(fh){
-  fh$nls <- fhCall(fh, "nls")
+  fh$nls <- fhNLS(fh)
   fh$counts <- fhCount(fh)
   fh$cv <- fhCV(fh)
   fh
 }
 
-fhCall <- function(fh, fun){
-  on.exit(detach(list(fHModel = fh$model)))
-  if (any(grepl("list", search()))) stop("list already on search path")
-  attach(list(fHModel = fh$model))
-  form1 <- paste("intensity ~ fHModel(")
+fhNLS <- function(fh){
+  model <- fh$model
+  form1 <- paste("intensity ~ model(")
   args <- as.character(names(formals(fh$model)))
   args <- args[!args %in% c("", "intensity", "xx")]
   args <- paste(args, collapse = ", ")
   form3 <- ", intensity = intensity, xx = x)"
-  form <- as.formula(paste(form1, args, form3), env = globalenv())
+  form <- as.formula(paste(form1, args, form3))
 
-  eval(call(fun, form, data = fh$data))
-}  
-
-fhnls <- function(fh){
-  ## the port algorithm with lower = 0 seems to run into infinity values
-  ## problems 
-  on.exit(detach(list(fHModel = fh$model)))
-  if (any(grepl("list", search()))) stop("list already on search path")
-  attach(list(fHModel = fh$model))
-  form1 <- paste("intensity ~ fHModel(")
-  args <- as.character(names(formals(fh$model)))
-  args <- args[!args %in% c("", "intensity", "xx")]
-  args <- paste(args, collapse = ", ")
-  form3 <- ", intensity = intensity, xx = x)"
-  form <- as.formula(paste(form1, args, form3), env = globalenv())
-
-  eval(call("nls", form, data = fh$data,
-            control = nls.control(minFactor = 1/2048)))  
-}  
+  eval(call("nls", form, start = fh$init, data = fh$data)) 
+}
 
 fhCount <- function(fh, lower = 0, upper = 256, subdivisions = 1000){
   total <-

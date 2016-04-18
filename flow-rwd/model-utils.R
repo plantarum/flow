@@ -15,6 +15,27 @@ fhPeakPlot <- function(fh, window, smooth = window/2){
   points(clean, cex = 2, col = 3)
 }
 
+pickPeaks <- function(fh){
+  message("plotting data...")
+  plotFH(fh)
+  message("select peak A:")
+  peakA <- unlist(locator(1))
+  points(peakA[1], peakA[2], col = 2, cex = 3)
+  message("select peak B:")
+  peakB <- unlist(locator(1))
+  points(peakB[1], peakB[2], col = 3, cex = 3)
+  res <- rbind(peakA, peakB)
+  colnames(res) <- c("mean", "height")
+  rownames(res) <- NULL
+  res
+}
+
+pickInit <- function(fh){
+  fh$peaks <- pickPeaks(fh)
+  fh$init <- flowInit(fh)
+  fh
+}
+
 findPeaks <- function(fh, window, smooth = window / 2){
   ## Note that this function can be called from the self-starting function,
   ## or from flowHist, each with a different object class for fh. This

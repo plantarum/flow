@@ -1,12 +1,13 @@
 library(flowCore)
 library(car)                            # for deltaMethod
 source("flowHist.R")
-source("flow-models.R")
+source("flowComponents.R")
 source("model-utils.R")
+source("flowAnalysis.R")
 
 fh1 <- flowHist(FILE =
                   "test-data/LMD good/188-15_+_rad_2015-04-20_647.LMD",
-                CHANNEL = "FL3.INT.LIN")
+                CHANNEL = "FL3.INT.LIN", window = 20, smooth = 10)
 plot(fh1, init = TRUE)
 
 fh1 <- fhAnalyze(fh1)
@@ -15,8 +16,6 @@ fh1
 
 fh2 <- flowHist(FILE = "test-data/LMD good/SM239 + R 2014-12-01 852.LMD",
                 CHANNEL = "FL3.INT.LIN")                
-
-fhPeakPlot(fh2, window = 20, smooth = 20)
 plot(fh2, init = TRUE)
 
 fh2 <- fhAnalyze(fh2)
@@ -31,7 +30,6 @@ out <- list()
 i <- lmdFiles[1]
 i <- lmdFiles[2]
 i <- lmdFiles[3]
-
 
 i <- lmdFiles[6]
 
@@ -53,6 +51,10 @@ i <- lmdFiles[13]
 
 fh1 <- flowHist(FILE = i, CHANNEL = "FL3.INT.LIN")
 plot(fh1, init = TRUE)
+
+fh1 <- fhAnalyze(fh1)
+
+fh1 <- pickInit(fh1)
 
 fh1 <- fhAnalyze(fh1)
 plot(fh1, comps = TRUE)
