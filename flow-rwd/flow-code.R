@@ -24,6 +24,20 @@ fh2
 
 setwd("~/research/techniques/flow/flow-rwd/test-data/camelina_test")
 lmdFiles <- list.files()
+i <- lmdFiles[4]
+
+fhi <- flowHist(FILE = i, CHANNEL = "FL3.INT.LIN")
+plot(fhi, init = TRUE)
+
+fhi <- fhAnalyze(fhi)
+
+fhi <- pickInit(fhi)
+plot(fhi, init = TRUE)
+
+fhi <- fhAnalyze(fhi)
+plot(fhi, comps = TRUE)
+fhi
+
 
 out <- list()
 
@@ -49,15 +63,5 @@ i <- lmdFiles[12]
 i <- lmdFiles[13]
 
 
-fh1 <- flowHist(FILE = i, CHANNEL = "FL3.INT.LIN")
-plot(fh1, init = TRUE)
-
-fh1 <- fhAnalyze(fh1)
-
-fh1 <- pickInit(fh1)
-
-fh1 <- fhAnalyze(fh1)
-plot(fh1, comps = TRUE)
-fh1
 
 

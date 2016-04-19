@@ -97,6 +97,10 @@ print.flowHist <- function(self){
                   round(1/self$cv$CI[1], 3))) 
   }
 
+  if(!is.null(self$RCS)){
+    message(paste("RCS:", round(self$RCS, 3)))
+  }
+  
 }
 
 plotFH <- function(self, ...){
