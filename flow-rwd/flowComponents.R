@@ -42,6 +42,20 @@ btB <- function(Mb, t1b, t2b, s1b, s2b, xx){
 }
 attr(btB, "compName") <- "btB"
 
+broadRect <- function(x1, x2, r, s1, s2, xx){
+  r * derf(x1 = x1, x2 = x2, s1 = s1, s2 = s2, x = xx)
+}
+
+brA <- function(Ma, ra, s1a, xx){
+  broadRect(x1 = Ma, x2 = Ma * 2, r = ra, s1 = s1a, s2 = s1a, xx)
+}
+attr(brA, "compName") <- "brA"
+
+brB <- function(Mb, rb, s1b, xx){
+  broadRect(x1 = Mb, x2 = Mb * 2, r = rb, s1 = s1b, s2 = s1b, xx)
+}
+attr(brB, "compName") <- "brB"
+
 ## Single-cut debris model
 ## 
 ## S(x) = a ⱼ₌ₓ₊₁∑ⁿ ³√j YⱼPₛ(j, x)
@@ -105,12 +119,12 @@ flowInit <- function(fh) {
     Ma <- peaks[1, "mean"]  
     Sa <- Ma / 20                         # assume CV = 0.05
     a1 <- peaks[1, "height"] * Sa / 0.4
-    t1a <- peaks[1, "height"] / 100
-    t2a <- t1a
+    ra <- peaks[1, "height"] / 100
+    ## t1a <- peaks[1, "height"] / 100
+    ## t2a <- t1a
     s1a <- 1
-    s2a <- 1
-    tmpval <- c(Ma, Sa, a1, t1a, t2a, s1a, s2a)
-    names(tmpval) <- c("Ma", "Sa", "a1", "t1a", "t2a", "s1a", "s2a")
+    tmpval <- c(Ma, Sa, a1, ra, s1a)
+    names(tmpval) <- c("Ma", "Sa", "a1", "ra", "s1a")
     value <- c(value, tmpval)
   }
 
@@ -132,12 +146,12 @@ flowInit <- function(fh) {
     Mb <- peaks[2, "mean"]
     Sb <- Mb / 20
     b1 <- peaks[2, "height"] * Sb / 0.4
-    t1b <- peaks[2, "height"] / 100
-    t2b <- t1b
+    rb <- peaks[1, "height"] / 100
+    ##t1b <- peaks[2, "height"] / 100
+    ##t2b <- t1b
     s1b <- 1
-    s2b <- 1
-    tmpval <- c(Mb, Sb, b1, t1b, t2b, s1b, s2b)
-    names(tmpval) <- c("Mb", "Sb", "b1", "t1b", "t2b", "s1b", "s2b")
+    tmpval <- c(Mb, Sb, b1, rb, s1b)
+    names(tmpval) <- c("Mb", "Sb", "b1", "rb", "s1b")
     value <- c(value, tmpval)
   }
 

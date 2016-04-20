@@ -41,7 +41,7 @@ flowHist <- function(FCS = NULL, FILE = NULL, CHANNEL,
     res$peaks <- cleanPeaks(findPeaks(res, window = window, smooth = smooth),
                             window = window)  
 
-  res$comps <- list(singleCut, fA1, fB1, btA, btB)
+  res$comps <- list(singleCut, fA1, fB1, brA, brB)
 
   if(res$peaks[1, "mean"] * 2 <= nrow(res$data))
     res$comps <- c(res$comps, fA2)
