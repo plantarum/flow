@@ -9,6 +9,22 @@ fhAnalyze <- function(fh){
 }
 
 fhRCS <- function(fh){
+  #########################################################################
+  ## This may not be a useful measure of analysis quality. It is heavily ##
+  ## influenced by the highest channels, where the expected value is     ##
+  ## close to zero. Consequently, observing 2 or 3 stray events in one   ##
+  ## of these channels, where the expected value may be < 0.02, produces ##
+  ## a higher value of (obs - exp)^2 / exp than larger absolute          ##
+  ## differences in the main region of the histogram.                    ##
+  ##                                                                     ##
+  ## Rabinovitch 1994:                                                   ##
+  ##                                                                     ##
+  ## The x2 is affected by a large number of variables, not all related  ##
+  ## to goodness of the fit; these include the number of cells acquired  ##
+  ## in the histogram and the end points of the analysis region used     ##
+  ## within the histogram.                                               ##
+  #########################################################################
+
   obs <- fh$data$intensity
   exp <- predict(fh$nls)
   zeros <- zapsmall(exp, digits = 5) == 0
